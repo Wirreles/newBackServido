@@ -35,7 +35,7 @@ const authenticateToken = async (req, res, next) => {
 const isVendedor = async (req, res, next) => {
   try {
     const userId = req.user.uid;
-    const userDoc = await db.collection('usuarios').doc(userId).get();
+    const userDoc = await db.collection('users').doc(userId).get();
 
     if (!userDoc.exists) {
       return res.status(404).json({ error: 'Usuario no encontrado' });

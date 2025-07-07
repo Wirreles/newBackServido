@@ -5,23 +5,28 @@ const Subscription = require('../models/subscription');
 const { db } = require('../firebase');
 
 // Instancia global de configuración para operaciones generales (como suscripciones)
-const mpSub = new mercadopago.MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
+const mpSub = new mercadopago.MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN_SUB });
 
+// Instancia global de configuración para operaciones generales (como suscripciones)
+const mp = new mercadopago.MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 class MercadoPagoController {
   // Maneja el callback de OAuth
   static async handleOAuthCallback(req, res) {
-    // Log de depuración para ver si la petición llega y con qué datos
     console.log('--- OAuth Callback ---');
     console.log('Método:', req.method);
     console.log('Headers:', req.headers);
     console.log('Body:', req.body);
+    console.log('Query:', req.query);
+  
+    // Soporta tanto GET (query) como POST (body)
+    const code = req.body.code || req.query.code;
+    const userId = req.body.userId || req.query.state; // Mercado Pago manda el userId en "state"
+  
+    if (!code || !userId) {
+      return res.status(400).json({ error: 'Código de autorización y userId son requeridos' });
+    }
+  
     try {
-      const { code, userId } = req.body;
-      
-      if (!code || !userId) {
-        return res.status(400).json({ error: 'Código de autorización y userId son requeridos' });
-      }
-
       const response = await axios.post('https://api.mercadopago.com/oauth/token', {
         client_secret: process.env.MP_CLIENT_SECRET,
         client_id: process.env.MP_CLIENT_ID,
@@ -29,10 +34,11 @@ class MercadoPagoController {
         code,
         redirect_uri: process.env.MP_REDIRECT_URI
       });
-
+  
       await Vendedor.updateMercadoPagoCredentials(userId, response.data);
-
-      res.json({ success: true });
+  
+      // Redirige al dashboard del vendedor
+      res.redirect('https://new-front-servido.vercel.app/dashboard/seller');
     } catch (error) {
       console.error('Error en OAuth callback:', error);
       res.status(500).json({ error: 'Error procesando autorización' });
@@ -123,7 +129,7 @@ class MercadoPagoController {
   // Pagos de productos
   static async createProductPreference(req, res) {
     try {
-      const { productId, quantity, vendedorId } = req.body;
+      const { productId, quantity, vendedorId, buyerId } = req.body;
 
       // Validar producto
       const productDoc = await db.collection('products').doc(productId).get();
@@ -147,12 +153,6 @@ class MercadoPagoController {
         return res.status(400).json({ error: 'Vendedor no conectado a MercadoPago' });
       }
 
-      // Verificar suscripción activa
-      const hasActiveSubscription = await Subscription.verifyActive(vendedorId);
-      if (!hasActiveSubscription) {
-        return res.status(403).json({ error: 'Suscripción inactiva' });
-      }
-
       // Obtener y verificar token
       const accessToken = await Vendedor.verifyAndRefreshToken(vendedorId);
       
@@ -170,10 +170,12 @@ class MercadoPagoController {
             currency_id: "ARS"
           }],
           notification_url: `${process.env.BASE_URL}/api/mercadopago/webhooks`,
-          external_reference: `product_${vendedorId}_${productId}`,
-          application_fee: productData.price * 0.12 // 12% de comisión
+          external_reference: `product_${vendedorId}_${productId}_${buyerId}`,
+          application_fee: productData.price * 0.12,
+          sponsor_id: Number(process.env.MP_SPONSOR_ID) // 👈 esta línea es CLAVE
         }
       });
+      
 
       res.json(result);
     } catch (error) {
@@ -250,19 +252,40 @@ class MercadoPagoController {
   }
 
   static async handleProductPayment(externalReference, status, paymentInfo) {
-    const [, vendedorId, productId] = externalReference.split('_');
-
-    await db.collection('transactions').add({
-      type: 'sale',
-      vendedorId,
-      productId,
-      amount: paymentInfo.transaction_amount,
-      status: paymentInfo.status,
-      paymentId: paymentInfo.id,
-      commission: paymentInfo.marketplace_fee,
-      createdAt: new Date()
-    });
+    const [, vendedorId, productId, buyerId] = externalReference.split('_');
+  
+    try {
+      // Obtener token del vendedor
+      const accessToken = await Vendedor.verifyAndRefreshToken(vendedorId);
+      const mpConfig = new mercadopago.MercadoPagoConfig({ accessToken });
+      const paymentInstance = new mercadopago.Payment(mpConfig);
+  
+      // Obtener detalles del pago desde cuenta del vendedor
+      const paymentDetails = await paymentInstance.get({ id: paymentInfo.id });
+  
+      // En entorno sandbox, a veces application_fee está solo en paymentInfo (webhook)
+      const commission = paymentDetails.application_fee || paymentInfo.application_fee || null;
+  
+      await db.collection('purchases').add({
+        type: 'sale',
+        vendedorId,
+        productId,
+        buyerId,
+        amount: paymentDetails.transaction_amount,
+        status: paymentDetails.status,
+        paymentId: paymentDetails.id,
+        ...(commission !== null && { commission }),
+        createdAt: new Date()
+      });
+  
+      console.log(`✔️ Transacción registrada. Pago ${paymentDetails.id}, buyerId: ${buyerId}, comisión: ${commission}`);
+    } catch (error) {
+      console.error('❌ Error en handleProductPayment:', error);
+    }
   }
+  
+  
+  
 
   // Renueva tokens expirados
   static async refreshToken(userId) {

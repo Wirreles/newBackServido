@@ -6,21 +6,20 @@ const router = express.Router();
 
 // Rutas públicas
 router.post('/webhooks', MercadoPagoController.handleWebhook);
+router.get('/oauth-callback', MercadoPagoController.handleOAuthCallback);
 
 // Rutas protegidas - requieren autenticación
 router.use(authenticateToken);
 
+router.post('/payments/create-preference', MercadoPagoController.createProductPreference);
 // Rutas de OAuth y conexión de cuenta
 router.get('/oauth-url', MercadoPagoController.getOAuthUrl);
-router.post('/oauth-callback', MercadoPagoController.handleOAuthCallback);
 router.get('/connection-status/:userId', MercadoPagoController.getConnectionStatus);
 router.post('/disconnect/:userId', isVendedor, MercadoPagoController.disconnect);
 
 // Rutas de suscripción
+router.use('/subscription', isVendedor);
 router.post('/subscription/create', MercadoPagoController.createSubscriptionPreference);
 
-// Rutas de pagos - requieren ser vendedor
-router.use('/payments', isVendedor);
-router.post('/payments/create-preference', MercadoPagoController.createProductPreference);
 
 module.exports = router; 
