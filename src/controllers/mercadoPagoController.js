@@ -11,76 +11,7 @@ const mpSub = new mercadopago.MercadoPagoConfig({ accessToken: process.env.MP_AC
 const mp = new mercadopago.MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 class MercadoPagoController {
   // Maneja el callback de OAuth
-  static async handleOAuthCallback(req, res) {
-    console.log('--- OAuth Callback ---');
-    console.log('Método:', req.method);
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    console.log('Query:', req.query);
-  
-    // Soporta tanto GET (query) como POST (body)
-    const code = req.body.code || req.query.code;
-    const userId = req.body.userId || req.query.state; // Mercado Pago manda el userId en "state"
-  
-    if (!code || !userId) {
-      return res.status(400).json({ error: 'Código de autorización y userId son requeridos' });
-    }
-  
-    try {
-      const response = await axios.post('https://api.mercadopago.com/oauth/token', {
-        client_secret: process.env.MP_CLIENT_SECRET,
-        client_id: process.env.MP_CLIENT_ID,
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: process.env.MP_REDIRECT_URI
-      });
-  
-      await Vendedor.updateMercadoPagoCredentials(userId, response.data);
-  
-      // Redirige al dashboard del vendedor
-      res.redirect('https://new-front-servido.vercel.app/dashboard/seller');
-    } catch (error) {
-      console.error('Error en OAuth callback:', error);
-      res.status(500).json({ error: 'Error procesando autorización' });
-    }
-  }
-
-  // Obtiene el estado de conexión
-  static async getConnectionStatus(req, res) {
-    try {
-      const { userId } = req.params;
-      const vendedor = await Vendedor.getByUserId(userId);
-
-      if (!vendedor || !vendedor.mercadoPagoAccessToken) {
-        return res.json({ connected: false });
-      }
-
-      const tokenExpiration = new Date(vendedor.tokenExpirationDate);
-      const isExpired = tokenExpiration < new Date();
-
-      res.json({
-        connected: true,
-        tokenExpired: isExpired,
-        userId: vendedor.mercadoPagoUserId
-      });
-    } catch (error) {
-      console.error('Error obteniendo estado de conexión:', error);
-      res.status(500).json({ error: 'Error obteniendo estado de conexión' });
-    }
-  }
-
-  // Desconecta la cuenta de Mercado Pago
-  static async disconnect(req, res) {
-    try {
-      const { userId } = req.params;
-      await Vendedor.disconnectMercadoPago(userId);
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error desconectando cuenta:', error);
-      res.status(500).json({ error: 'Error desconectando cuenta' });
-    }
-  }
-
+ 
   // Suscripciones
   static async createSubscriptionPreference(req, res) {
     try {
@@ -126,87 +57,171 @@ class MercadoPagoController {
     }
   }
 
-  // Pagos de productos
-  static async createProductPreference(req, res) {
-    try {
-      const { productId, quantity, vendedorId, buyerId } = req.body;
+  // PAGOS DE PRODUCTOS CENTRALIZADO
+// PAGOS DE PRODUCTOS CENTRALIZADO
+static async createProductPreference(req, res) {
+  try {
+    console.log('DEBUG: Body recibido:', req.body);
+    const { products, buyerId, buyerEmail } = req.body;
 
-      // Validar producto
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'El array de productos es inválido o está vacío' });
+    }
+
+    if (!buyerId || !buyerEmail) {
+      return res.status(400).json({ error: 'Faltan buyerId o buyerEmail' });
+    }
+
+    const validatedProducts = [];
+    let totalAmount = 0;
+
+    for (const [i, product] of products.entries()) {
+      const { productId, quantity } = product;
+
+      if (!productId || typeof productId !== 'string' || !quantity || typeof quantity !== 'number' || quantity <= 0) {
+        return res.status(400).json({ error: `Datos inválidos en el producto ${i}` });
+      }
+
       const productDoc = await db.collection('products').doc(productId).get();
       if (!productDoc.exists) {
-        return res.status(404).json({ error: 'Producto no encontrado' });
+        return res.status(404).json({ error: `Producto no encontrado: ${productId}` });
       }
+
       const productData = productDoc.data();
-      if (productData.sellerId !== vendedorId) {
-        return res.status(403).json({ error: 'El producto no pertenece a este vendedor' });
-      }
-      if (productData.isService !== false && productData.isService !== true) {
-        return res.status(400).json({ error: 'El producto no tiene el campo isService definido correctamente' });
-      }
+
       if (productData.disponible === false) {
-        return res.status(400).json({ error: 'El producto no está disponible' });
+        return res.status(400).json({ error: `El producto ${productData.name} no está disponible` });
       }
 
-      // Obtener vendedor y verificar conexión MP
-      const vendedor = await Vendedor.getByUserId(vendedorId);
-      if (!vendedor || !vendedor.mercadopagoConnected) {
-        return res.status(400).json({ error: 'Vendedor no conectado a MercadoPago' });
+      if (typeof productData.stock === 'number' && productData.stock < quantity) {
+        return res.status(400).json({ error: `Stock insuficiente para el producto ${productData.name}` });
       }
 
-      // Obtener y verificar token
-      const accessToken = await Vendedor.verifyAndRefreshToken(vendedorId);
-      
-      // Crear preferencia con el token del vendedor
-      const mpConfig = new mercadopago.MercadoPagoConfig({ accessToken });
-      const preference = new mercadopago.Preference(mpConfig);
-
-      const result = await preference.create({
-        body: {
-          items: [{
-            id: productId,
-            title: productData.name,
-            quantity: quantity,
-            unit_price: productData.price,
-            currency_id: "ARS"
-          }],
-          notification_url: `${process.env.BASE_URL}/api/mercadopago/webhooks`,
-          external_reference: `product_${vendedorId}_${productId}_${buyerId}`,
-          application_fee: productData.price * 0.12,
-          sponsor_id: Number(process.env.MP_SPONSOR_ID) // 👈 esta línea es CLAVE
-        }
+      validatedProducts.push({
+        productId,
+        quantity,
+        vendedorId: productData.sellerId, // Aseguramos que siempre se incluya el id del vendedor
+        name: productData.name,
+        price: productData.price,
+        stock: productData.stock ?? null,
+        paidToSeller: false // NUEVO CAMPO
       });
-      
 
-      res.json(result);
-    } catch (error) {
-      console.error('Error creando preferencia de producto:', error);
-      res.status(500).json({ error: 'Error creando preferencia' });
+      totalAmount += productData.price * quantity;
     }
-  }
 
-  // Webhooks
+    console.log('DEBUG: Productos validados:', validatedProducts);
+
+    const items = validatedProducts.map(product => ({
+      id: product.productId,
+      title: product.name,
+      quantity: product.quantity,
+      unit_price: product.price,
+      currency_id: "ARS"
+    }));
+
+    const external_reference = `cart_${Buffer.from(JSON.stringify({
+      buyerId,
+      products: validatedProducts
+    })).toString('base64')}`;
+
+    const preference = new mercadopago.Preference(mp);
+
+    const result = await preference.create({
+      body: {
+        items,
+        notification_url: `${process.env.BASE_URL}/api/mercadopago/webhooks`,
+        external_reference,
+        payer: { email: buyerEmail },
+        back_urls: {
+          success: `${process.env.FRONTEND_URL}/purchase/success`,
+          failure: `${process.env.FRONTEND_URL}/purchase/failure`,
+          pending: `${process.env.FRONTEND_URL}/purchase/pending`
+        },
+        auto_return: "approved"
+      }
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('ERROR: Error creando preferencia centralizada:', error);
+    res.status(500).json({ error: 'Error creando preferencia', details: error.message });
+  }
+}
+
+
+  // WEBHOOK CENTRALIZADO
   static async handleWebhook(req, res) {
     try {
       const { type, data } = req.body;
+  
       if (type === 'payment') {
-        // Instanciar Payment correctamente con la instancia global
-        const paymentInstance = new mercadopago.Payment(mpSub);
+        const paymentInstance = new mercadopago.Payment(mp);
         const paymentInfo = await paymentInstance.get({ id: data.id });
-        const { external_reference, status, transaction_amount } = paymentInfo;
-
-        // Determinar tipo de pago
-        if (external_reference.startsWith('subscription_')) {
+        const { external_reference, status } = paymentInfo;
+  
+        if (external_reference.startsWith('cart_')) {
+          const base64 = external_reference.replace('cart_', '');
+          let referenceData;
+          try {
+            referenceData = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+          } catch (e) {
+            return res.status(400).json({ error: 'Referencia inválida' });
+          }
+  
+          if (status === 'approved') {
+            // Calcular total
+            const totalAmount = referenceData.products.reduce((total, product) => {
+              return total + (product.price * product.quantity);
+            }, 0);
+  
+            // Actualizar stock
+            for (const prod of referenceData.products) {
+              const productRef = db.collection('products').doc(prod.productId);
+              const productDoc = await productRef.get();
+  
+              if (!productDoc.exists) continue;
+  
+              const productData = productDoc.data();
+              if (typeof productData.stock === 'number') {
+                if (productData.stock < prod.quantity) {
+                  await db.collection('failed_purchases').add({
+                    reason: 'Stock insuficiente en webhook',
+                    ...prod,
+                    buyerId: referenceData.buyerId,
+                    paymentId: paymentInfo.id,
+                    createdAt: new Date()
+                  });
+                  continue;
+                }
+  
+                await productRef.update({ stock: productData.stock - prod.quantity });
+              }
+            }
+  
+            // Guardar la compra con el formato especificado
+            await db.collection('purchases').add({
+              buyerId: referenceData.buyerId,
+              products: referenceData.products,
+              paymentId: paymentInfo.id,
+              status: paymentInfo.status,
+              totalAmount: totalAmount,
+              paidToSellers: false, // NUEVO CAMPO
+              createdAt: new Date()
+            });
+          }
+        } else if (external_reference.startsWith('subscription_')) {
           await MercadoPagoController.handleSubscriptionPayment(external_reference, status, paymentInfo);
-        } else if (external_reference.startsWith('product_')) {
-          await MercadoPagoController.handleProductPayment(external_reference, status, paymentInfo);
         }
       }
+  
       res.json({ received: true });
     } catch (error) {
-      console.error('Error procesando webhook:', error);
+      console.error('❌ ERROR webhook:', error);
       res.status(500).json({ error: 'Error procesando notificación' });
     }
   }
+  
 
   static async handleSubscriptionPayment(externalReference, status, paymentInfo) {
     const [, userId, planType] = externalReference.split('_');
@@ -240,7 +255,6 @@ class MercadoPagoController {
 
       // Registrar transacción
       await db.collection('transactions').add({
-        type: 'subscription',
         userId,
         amount: paymentInfo.transaction_amount,
         status: paymentInfo.status,
@@ -251,80 +265,39 @@ class MercadoPagoController {
     }
   }
 
-  static async handleProductPayment(externalReference, status, paymentInfo) {
-    const [, vendedorId, productId, buyerId] = externalReference.split('_');
+  // static async handleProductPayment(externalReference, status, paymentInfo) {
+  //   const [, vendedorId, productId, buyerId] = externalReference.split('_');
   
-    try {
-      // Obtener token del vendedor
-      const accessToken = await Vendedor.verifyAndRefreshToken(vendedorId);
-      const mpConfig = new mercadopago.MercadoPagoConfig({ accessToken });
-      const paymentInstance = new mercadopago.Payment(mpConfig);
+  //   try {
+  //     // Obtener token del vendedor
+  //     const accessToken = await Vendedor.verifyAndRefreshToken(vendedorId);
+  //     const mpConfig = new mercadopago.MercadoPagoConfig({ accessToken });
+  //     const paymentInstance = new mercadopago.Payment(mpConfig);
   
-      // Obtener detalles del pago desde cuenta del vendedor
-      const paymentDetails = await paymentInstance.get({ id: paymentInfo.id });
+  //     // Obtener detalles del pago desde cuenta del vendedor
+  //     const paymentDetails = await paymentInstance.get({ id: paymentInfo.id });
   
-      // En entorno sandbox, a veces application_fee está solo en paymentInfo (webhook)
-      const commission = paymentDetails.application_fee || paymentInfo.application_fee || null;
+  //     // En entorno sandbox, a veces application_fee está solo en paymentInfo (webhook)
+  //     const commission = paymentDetails.application_fee || paymentInfo.application_fee || null;
   
-      await db.collection('purchases').add({
-        type: 'sale',
-        vendedorId,
-        productId,
-        buyerId,
-        amount: paymentDetails.transaction_amount,
-        status: paymentDetails.status,
-        paymentId: paymentDetails.id,
-        ...(commission !== null && { commission }),
-        createdAt: new Date()
-      });
+  //     await db.collection('purchases').add({
+  //       vendedorId,
+  //       productId,
+  //       buyerId,
+  //       amount: paymentDetails.transaction_amount,
+  //       status: paymentDetails.status,
+  //       paymentId: paymentDetails.id,
+  //       ...(commission !== null && { commission }),
+  //       createdAt: new Date()
+  //     });
   
-      console.log(`✔️ Transacción registrada. Pago ${paymentDetails.id}, buyerId: ${buyerId}, comisión: ${commission}`);
-    } catch (error) {
-      console.error('❌ Error en handleProductPayment:', error);
-    }
-  }
-  
-  
+  //     console.log(`✔️ Transacción registrada. Pago ${paymentDetails.id}, buyerId: ${buyerId}, comisión: ${commission}`);
+  //   } catch (error) {
+  //     console.error('❌ Error en handleProductPayment:', error);
+  //   }
+  // }
   
 
-  // Renueva tokens expirados
-  static async refreshToken(userId) {
-    const vendedor = await Vendedor.getByUserId(userId);
-    if (!vendedor || !vendedor.mercadopago?.refresh_token) {
-      throw new Error('No hay refresh token disponible');
-    }
-
-    const response = await axios.post('https://api.mercadopago.com/oauth/token', {
-      client_id: process.env.MP_CLIENT_ID,
-      client_secret: process.env.MP_CLIENT_SECRET,
-      grant_type: 'refresh_token',
-      refresh_token: vendedor.mercadopago.refresh_token
-    });
-
-    await Vendedor.updateMercadoPagoCredentials(userId, response.data);
-    return response.data.access_token;
-  }
-
-
-    // Devuelve la URL de autorización de MercadoPago
-    static async getOAuthUrl(req, res) {
-      try {
-        // Puedes obtener el userId del token si lo necesitas: req.user.uid
-        const clientId = process.env.MP_CLIENT_ID;
-        const redirectUri = process.env.MP_REDIRECT_URI;
-        const baseUrl = "https://auth.mercadopago.com/authorization";
-        const responseType = "code";
-        const state = req.user.uid; // Opcional: para identificar al usuario
-  
-        const authUrl = `${baseUrl}?client_id=${clientId}&response_type=${responseType}&platform_id=mp&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
-  
-        res.json({ authUrl });
-      } catch (error) {
-        console.error('Error generando URL de autorización:', error);
-        res.status(500).json({ error: 'Error generando URL de autorización' });
-      }
-    }
-  
 }
 
 module.exports = MercadoPagoController; 

@@ -5,17 +5,14 @@ const { authenticateToken, isVendedor } = require('../middleware/auth');
 const router = express.Router();
 
 // Rutas públicas
-router.post('/webhooks', MercadoPagoController.handleWebhook);
-router.get('/oauth-callback', MercadoPagoController.handleOAuthCallback);
+router.post('/webhooks', MercadoPagoController.handleWebhook); 
+router.post('/payments/create-preference', MercadoPagoController.createProductPreference);
 
 // Rutas protegidas - requieren autenticación
 router.use(authenticateToken);
 
-router.post('/payments/create-preference', MercadoPagoController.createProductPreference);
 // Rutas de OAuth y conexión de cuenta
-router.get('/oauth-url', MercadoPagoController.getOAuthUrl);
-router.get('/connection-status/:userId', MercadoPagoController.getConnectionStatus);
-router.post('/disconnect/:userId', isVendedor, MercadoPagoController.disconnect);
+// router.get('/connection-status/:userId', MercadoPagoController.getConnectionStatus);
 
 // Rutas de suscripción
 router.use('/subscription', isVendedor);
