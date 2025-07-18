@@ -23,6 +23,173 @@ try {
 }
 
 class MercadoPagoController {
+  // Función para probar conexión directa con MercadoPago (sin SDK)
+  static async testDirectConnection(req, res) {
+    try {
+      console.log('=== PRUEBA DE CONEXIÓN DIRECTA CON MERCADOPAGO ===');
+      
+      if (!process.env.MP_ACCESS_TOKEN) {
+        return res.status(500).json({ error: 'MP_ACCESS_TOKEN no configurado' });
+      }
+
+      console.log('DEBUG: Token configurado:', !!process.env.MP_ACCESS_TOKEN);
+      console.log('DEBUG: Primeros 10 caracteres:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+      console.log('DEBUG: Longitud del token:', process.env.MP_ACCESS_TOKEN.length);
+
+      // Verificar formato del token
+      const tokenPattern = /^APP_USR-[a-zA-Z0-9-]+$/;
+      const isValidFormat = tokenPattern.test(process.env.MP_ACCESS_TOKEN);
+      console.log('DEBUG: Formato de token válido:', isValidFormat);
+
+      // Probar diferentes endpoints de MercadoPago
+      const tests = [];
+
+      // Test 1: Endpoint básico de MercadoPago
+      try {
+        console.log('DEBUG: Test 1 - Endpoint básico...');
+        const response1 = await fetch('https://api.mercadopago.com', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'Servido-Direct-Test/1.0'
+          }
+        });
+
+        tests.push({
+          name: 'Endpoint básico',
+          url: 'https://api.mercadopago.com',
+          status: response1.status,
+          statusText: response1.statusText,
+          success: response1.ok,
+          headers: Object.fromEntries(response1.headers.entries())
+        });
+
+        console.log('DEBUG: Test 1 resultado:', tests[tests.length - 1]);
+      } catch (error) {
+        tests.push({
+          name: 'Endpoint básico',
+          error: error.message
+        });
+      }
+
+      // Test 2: Endpoint de preferencias (el que falla)
+      try {
+        console.log('DEBUG: Test 2 - Endpoint de preferencias...');
+        
+        const testData = {
+          items: [{
+            id: 'direct_test_item',
+            title: 'Prueba Directa',
+            quantity: 1,
+            unit_price: 1.00,
+            currency_id: "ARS"
+          }],
+          external_reference: 'direct_test_' + Date.now()
+        };
+
+        const response2 = await fetch('https://api.mercadopago.com/checkout/preferences', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+            'Content-Type': 'application/json',
+            'User-Agent': 'Servido-Direct-Test/1.0'
+          },
+          body: JSON.stringify(testData)
+        });
+
+        const responseData = {
+          name: 'Endpoint de preferencias',
+          url: 'https://api.mercadopago.com/checkout/preferences',
+          status: response2.status,
+          statusText: response2.statusText,
+          success: response2.ok,
+          headers: Object.fromEntries(response2.headers.entries())
+        };
+
+        if (response2.ok) {
+          const result = await response2.json();
+          responseData.result = result;
+          console.log('DEBUG: Preferencia creada exitosamente:', result.id);
+        } else {
+          try {
+            const errorText = await response2.text();
+            responseData.errorBody = errorText;
+            console.log('DEBUG: Error response:', errorText);
+          } catch (e) {
+            responseData.errorBody = 'No se pudo leer error response';
+          }
+        }
+
+        tests.push(responseData);
+        console.log('DEBUG: Test 2 resultado:', tests[tests.length - 1]);
+
+      } catch (error) {
+        tests.push({
+          name: 'Endpoint de preferencias',
+          error: error.message,
+          type: error.type || 'unknown'
+        });
+        console.log('DEBUG: Test 2 error:', error.message);
+      }
+
+      // Test 3: Verificar si es problema de red
+      try {
+        console.log('DEBUG: Test 3 - Conectividad básica...');
+        const response3 = await fetch('https://api.mercadopago.com', {
+          method: 'GET',
+          headers: {
+            'User-Agent': 'Servido-Connectivity-Test/1.0'
+          }
+        });
+
+        tests.push({
+          name: 'Conectividad básica',
+          url: 'https://api.mercadopago.com',
+          status: response3.status,
+          statusText: response3.statusText,
+          success: response3.ok
+        });
+
+      } catch (error) {
+        tests.push({
+          name: 'Conectividad básica',
+          error: error.message
+        });
+      }
+
+      // Análisis de resultados
+      const analysis = {
+        tokenValid: isValidFormat,
+        hasConnectivity: tests.some(t => t.name === 'Conectividad básica' && t.success),
+        basicEndpointWorks: tests.some(t => t.name === 'Endpoint básico' && t.success),
+        preferencesEndpointWorks: tests.some(t => t.name === 'Endpoint de preferencias' && t.success)
+      };
+
+      console.log('DEBUG: Análisis final:', analysis);
+
+      res.json({
+        success: analysis.preferencesEndpointWorks,
+        tokenInfo: {
+          configured: !!process.env.MP_ACCESS_TOKEN,
+          length: process.env.MP_ACCESS_TOKEN.length,
+          format: isValidFormat,
+          isSandbox: process.env.MP_ACCESS_TOKEN.includes('TEST')
+        },
+        tests: tests,
+        analysis: analysis,
+        recommendations: []
+      });
+
+    } catch (error) {
+      console.error('ERROR: Error en prueba directa:', error);
+      res.status(500).json({ 
+        error: 'Error en prueba directa', 
+        details: error.message 
+      });
+    }
+  }
+
   // Función para diagnosticar configuración completa del sistema
   static async diagnoseConfiguration(req, res) {
     try {
