@@ -35,6 +35,7 @@ app.use(cors({
       callback(null, true);
     } else {
       console.log('CORS bloqueado para origin:', origin);
+      console.log('Orígenes permitidos:', allowedOrigins);
       callback(new Error('No permitido por CORS'));
     }
   },
@@ -57,7 +58,21 @@ app.use('/api/mercadopago', mercadoPagoRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error('ERROR:', err.message);
+  console.error('ERROR: Stack:', err.stack);
+  
+  // Manejo específico de errores CORS
+  if (err.message === 'No permitido por CORS') {
+    console.error('ERROR CORS: Origin bloqueado:', req.headers.origin);
+    console.error('ERROR CORS: Headers completos:', req.headers);
+    return res.status(403).json({
+      error: 'Error de CORS',
+      message: 'El origen de la petición no está permitido',
+      origin: req.headers.origin,
+      allowedOrigins: allowedOrigins
+    });
+  }
+  
   res.status(500).json({
     error: 'Error interno del servidor',
     message: process.env.NODE_ENV === 'development' ? err.message : undefined

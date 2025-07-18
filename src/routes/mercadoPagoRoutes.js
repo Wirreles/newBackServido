@@ -11,6 +11,7 @@ router.get('/test-connection', MercadoPagoController.testMercadoPagoConnection);
 router.get('/verify-token', MercadoPagoController.verifyMercadoPagoToken);
 router.get('/simple-token-test', MercadoPagoController.simpleTokenTest);
 router.get('/comprehensive-token-test', MercadoPagoController.comprehensiveTokenTest);
+router.get('/diagnose-config', MercadoPagoController.diagnoseConfiguration);
 
 // Rutas protegidas - requieren autenticación
 router.use(authenticateToken);

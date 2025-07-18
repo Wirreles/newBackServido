@@ -23,6 +23,83 @@ try {
 }
 
 class MercadoPagoController {
+  // Función para diagnosticar configuración de URLs
+  static async diagnoseConfiguration(req, res) {
+    try {
+      console.log('=== DIAGNÓSTICO DE CONFIGURACIÓN ===');
+      
+      const config = {
+        environment: {
+          NODE_ENV: process.env.NODE_ENV || 'no configurado',
+          PORT: process.env.PORT || 'no configurado'
+        },
+        urls: {
+          BASE_URL: process.env.BASE_URL || 'no configurado',
+          FRONTEND_URL: process.env.FRONTEND_URL || 'no configurado'
+        },
+        mercadopago: {
+          MP_ACCESS_TOKEN: process.env.MP_ACCESS_TOKEN ? 'configurado' : 'no configurado',
+          MP_ACCESS_TOKEN_SUB: process.env.MP_ACCESS_TOKEN_SUB ? 'configurado' : 'no configurado'
+        },
+        headers: {
+          origin: req.headers.origin || 'no origin',
+          host: req.headers.host || 'no host',
+          referer: req.headers.referer || 'no referer'
+        }
+      };
+
+      console.log('DEBUG: Configuración actual:', JSON.stringify(config, null, 2));
+
+      // Verificar si las URLs están configuradas correctamente
+      const issues = [];
+      
+      if (!process.env.BASE_URL) {
+        issues.push('BASE_URL no está configurada');
+      } else if (!process.env.BASE_URL.startsWith('http')) {
+        issues.push('BASE_URL debe comenzar con http:// o https://');
+      }
+      
+      if (!process.env.FRONTEND_URL) {
+        issues.push('FRONTEND_URL no está configurada');
+      } else if (!process.env.FRONTEND_URL.startsWith('http')) {
+        issues.push('FRONTEND_URL debe comenzar con http:// o https://');
+      }
+
+      // Verificar si el origin del request está permitido
+      const allowedOrigins = [
+        'https://www.servido.com.ar',
+        'https://servido.com.ar',
+        'http://localhost:3000',
+        'http://localhost:3001',
+        'http://localhost:5173',
+        'http://localhost:4173',
+        'https://new-front-servido.vercel.app'
+      ];
+
+      const requestOrigin = req.headers.origin;
+      const isOriginAllowed = !requestOrigin || allowedOrigins.includes(requestOrigin);
+      
+      if (!isOriginAllowed) {
+        issues.push(`Origin '${requestOrigin}' no está en la lista de orígenes permitidos`);
+      }
+
+      res.json({
+        success: true,
+        config: config,
+        issues: issues,
+        isOriginAllowed: isOriginAllowed,
+        allowedOrigins: allowedOrigins
+      });
+
+    } catch (error) {
+      console.error('ERROR: Error en diagnóstico:', error);
+      res.status(500).json({ 
+        error: 'Error en diagnóstico', 
+        details: error.message 
+      });
+    }
+  }
+
   // Función para probar múltiples endpoints de MercadoPago
   static async comprehensiveTokenTest(req, res) {
     try {
