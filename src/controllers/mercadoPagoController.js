@@ -4,27 +4,26 @@ const Vendedor = require('../models/vendedor');
 const Subscription = require('../models/subscription');
 const { db } = require('../firebase');
 
-// Configuración más robusta del SDK de MercadoPago
+// Configuración del SDK de MercadoPago
 let client;
 let mpSub;
 
 try {
-  // Configuración correcta del SDK de MercadoPago
-  mercadopago.configure({
-    access_token: process.env.MP_ACCESS_TOKEN
-  });
-  
+  // Configuración para pagos normales (productos)
   client = new mercadopago.MercadoPagoConfig({ 
     accessToken: process.env.MP_ACCESS_TOKEN 
   });
   
+  // Configuración para suscripciones (proyecto diferente)
   mpSub = new mercadopago.MercadoPagoConfig({ 
     accessToken: process.env.MP_ACCESS_TOKEN_SUB 
   });
   
   console.log('DEBUG: Configuración de MercadoPago inicializada correctamente');
-  console.log('DEBUG: Token configurado:', !!process.env.MP_ACCESS_TOKEN);
-  console.log('DEBUG: Primeros 10 caracteres:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+  console.log('DEBUG: Token principal configurado:', !!process.env.MP_ACCESS_TOKEN);
+  console.log('DEBUG: Token suscripciones configurado:', !!process.env.MP_ACCESS_TOKEN_SUB);
+  console.log('DEBUG: Primeros 10 caracteres token principal:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+  console.log('DEBUG: Primeros 10 caracteres token suscripciones:', process.env.MP_ACCESS_TOKEN_SUB.substring(0, 10) + '...');
 } catch (error) {
   console.error('ERROR: Error inicializando configuración de MercadoPago:', error);
 }
@@ -268,6 +267,7 @@ class MercadoPagoController {
         try {
           console.log('DEBUG: Probando conexión con MercadoPago...');
           
+          // Usar el cliente principal para pagos normales
           const preference = new mercadopago.Preference(client);
           const testData = {
             body: {
@@ -367,7 +367,7 @@ class MercadoPagoController {
         return res.status(404).json({ error: 'Usuario no encontrado' });
       }
 
-      // Crear preferencia para suscripción con la instancia global
+      // Crear preferencia para suscripción con el token de suscripciones
       const preference = new mercadopago.Preference(mpSub);
 
       const result = await preference.create({
