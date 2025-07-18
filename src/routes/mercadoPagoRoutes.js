@@ -10,6 +10,7 @@ router.post('/payments/create-preference', MercadoPagoController.createProductPr
 router.get('/test-connection', MercadoPagoController.testMercadoPagoConnection);
 router.get('/verify-token', MercadoPagoController.verifyMercadoPagoToken);
 router.get('/simple-token-test', MercadoPagoController.simpleTokenTest);
+router.get('/comprehensive-token-test', MercadoPagoController.comprehensiveTokenTest);
 
 // Rutas protegidas - requieren autenticación
 router.use(authenticateToken);
