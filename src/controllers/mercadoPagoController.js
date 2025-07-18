@@ -23,6 +23,119 @@ try {
 }
 
 class MercadoPagoController {
+  // Función para probar creación de preferencia con debug detallado
+  static async testPreferenceCreation(req, res) {
+    try {
+      console.log('=== PRUEBA DE CREACIÓN DE PREFERENCIA CON DEBUG ===');
+      console.log('DEBUG: Timestamp:', new Date().toISOString());
+      
+      if (!process.env.MP_ACCESS_TOKEN) {
+        return res.status(500).json({ error: 'MP_ACCESS_TOKEN no configurado' });
+      }
+
+      if (!client) {
+        return res.status(500).json({ error: 'Cliente de MercadoPago no inicializado' });
+      }
+
+      console.log('DEBUG: Token configurado:', !!process.env.MP_ACCESS_TOKEN);
+      console.log('DEBUG: Primeros 10 caracteres del token:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+      console.log('DEBUG: Cliente inicializado:', !!client);
+
+      // Crear preferencia mínima para prueba
+      const preference = new mercadopago.Preference(client);
+      
+      const testPreferenceData = {
+        body: {
+          items: [{
+            id: 'test_item_minimal',
+            title: 'Producto de Prueba Mínimo',
+            quantity: 1,
+            unit_price: 1.00,
+            currency_id: "ARS"
+          }],
+          external_reference: 'test_minimal_' + Date.now()
+        }
+      };
+
+      console.log('DEBUG: Datos de preferencia de prueba:', JSON.stringify(testPreferenceData, null, 2));
+      console.log('DEBUG: Intentando crear preferencia mínima...');
+      
+      const startTime = Date.now();
+      
+      try {
+        const result = await preference.create(testPreferenceData);
+        const endTime = Date.now();
+        const responseTime = endTime - startTime;
+        
+        console.log('DEBUG: Preferencia creada exitosamente en', responseTime + 'ms');
+        console.log('DEBUG: ID de preferencia:', result.id);
+        console.log('DEBUG: Respuesta completa:', JSON.stringify(result, null, 2));
+
+        res.json({
+          success: true,
+          message: 'Preferencia de prueba creada exitosamente',
+          preferenceId: result.id,
+          responseTime: responseTime + 'ms',
+          result: result
+        });
+
+      } catch (preferenceError) {
+        const endTime = Date.now();
+        const responseTime = endTime - startTime;
+        
+        console.error('ERROR: Error creando preferencia de prueba:', preferenceError);
+        console.error('ERROR: Tipo de error:', preferenceError.constructor.name);
+        console.error('ERROR: Mensaje:', preferenceError.message);
+        console.error('ERROR: Tiempo de respuesta:', responseTime + 'ms');
+        
+        // Intentar obtener más información del error
+        let errorDetails = {
+          type: preferenceError.type || 'unknown',
+          message: preferenceError.message,
+          responseTime: responseTime + 'ms'
+        };
+
+        if (preferenceError.response) {
+          console.error('ERROR: Status:', preferenceError.response.status);
+          console.error('ERROR: StatusText:', preferenceError.response.statusText);
+          
+          errorDetails.status = preferenceError.response.status;
+          errorDetails.statusText = preferenceError.response.statusText;
+          
+          try {
+            const errorBody = await preferenceError.response.text();
+            console.error('ERROR: Response body (raw):', errorBody);
+            errorDetails.responseBody = errorBody;
+            
+            // Intentar parsear como JSON
+            try {
+              const errorJson = JSON.parse(errorBody);
+              console.error('ERROR: Response body (parsed):', JSON.stringify(errorJson, null, 2));
+              errorDetails.responseJson = errorJson;
+            } catch (parseError) {
+              console.error('ERROR: Response body no es JSON válido');
+            }
+          } catch (e) {
+            console.error('ERROR: No se pudo leer response body:', e.message);
+          }
+        }
+
+        res.status(500).json({
+          success: false,
+          error: 'Error creando preferencia de prueba',
+          details: errorDetails
+        });
+      }
+
+    } catch (error) {
+      console.error('ERROR: Error en prueba de preferencia:', error);
+      res.status(500).json({ 
+        error: 'Error en prueba de preferencia', 
+        details: error.message 
+      });
+    }
+  }
+
   // Función para diagnosticar configuración de URLs
   static async diagnoseConfiguration(req, res) {
     try {
@@ -620,19 +733,50 @@ static async createProductPreference(req, res) {
     // Crear preferencia
     let result;
     try {
+      console.log('DEBUG: Intentando crear preferencia con MercadoPago...');
+      console.log('DEBUG: Token usado:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+      console.log('DEBUG: Datos de preferencia:', JSON.stringify(preferenceData, null, 2));
+      
       result = await preference.create(preferenceData);
-      console.log('Preferencia creada:', result);
+      console.log('DEBUG: Preferencia creada exitosamente:', result.id);
     } catch (preferenceError) {
-      console.error('Error creando preferencia:', preferenceError);
+      console.error('ERROR: Error creando preferencia:', preferenceError);
+      console.error('ERROR: Tipo de error:', preferenceError.constructor.name);
+      console.error('ERROR: Mensaje:', preferenceError.message);
+      console.error('ERROR: Stack:', preferenceError.stack);
+      
+      // Intentar obtener más información del error
       if (preferenceError.response) {
-        console.error('Status:', preferenceError.response.status);
+        console.error('ERROR: Status:', preferenceError.response.status);
+        console.error('ERROR: StatusText:', preferenceError.response.statusText);
+        console.error('ERROR: Headers:', preferenceError.response.headers);
         try {
           const errorBody = await preferenceError.response.text();
-          console.error('Response body:', errorBody);
+          console.error('ERROR: Response body (raw):', errorBody);
+          
+          // Intentar parsear como JSON
+          try {
+            const errorJson = JSON.parse(errorBody);
+            console.error('ERROR: Response body (parsed):', JSON.stringify(errorJson, null, 2));
+          } catch (parseError) {
+            console.error('ERROR: Response body no es JSON válido');
+          }
         } catch (e) {
-          console.error('No se pudo leer response body');
+          console.error('ERROR: No se pudo leer response body:', e.message);
         }
       }
+      
+      // Análisis específico del error
+      if (preferenceError.type === 'invalid-json') {
+        console.error('ERROR: MercadoPago devolvió una respuesta JSON inválida');
+        console.error('ERROR: Esto indica un problema con el token de acceso o la API');
+        console.error('ERROR: Posibles causas:');
+        console.error('  - Token expirado');
+        console.error('  - Token sin permisos');
+        console.error('  - Rate limiting');
+        console.error('  - Problema temporal de MercadoPago');
+      }
+      
       throw preferenceError;
     }
 
@@ -820,4 +964,5 @@ static async createProductPreference(req, res) {
 
 }
 
+module.exports = MercadoPagoController; 
 module.exports = MercadoPagoController; 
