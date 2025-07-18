@@ -4,15 +4,67 @@ const Vendedor = require('../models/vendedor');
 const Subscription = require('../models/subscription');
 const { db } = require('../firebase');
 
-// Configuración simplificada del SDK de MercadoPago
-const client = new mercadopago.MercadoPagoConfig({ 
-  accessToken: process.env.MP_ACCESS_TOKEN 
-});
+// Configuración más robusta del SDK de MercadoPago
+let client;
+let mpSub;
 
-// Instancia global de configuración para suscripciones
-const mpSub = new mercadopago.MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN_SUB });
+try {
+  client = new mercadopago.MercadoPagoConfig({ 
+    accessToken: process.env.MP_ACCESS_TOKEN 
+  });
+  
+  mpSub = new mercadopago.MercadoPagoConfig({ 
+    accessToken: process.env.MP_ACCESS_TOKEN_SUB 
+  });
+  
+  console.log('DEBUG: Configuración de MercadoPago inicializada correctamente');
+} catch (error) {
+  console.error('ERROR: Error inicializando configuración de MercadoPago:', error);
+}
 
 class MercadoPagoController {
+  // Función de prueba para verificar conectividad con MercadoPago
+  static async testMercadoPagoConnection(req, res) {
+    try {
+      console.log('DEBUG: Probando conectividad con MercadoPago...');
+      
+      if (!process.env.MP_ACCESS_TOKEN) {
+        return res.status(500).json({ error: 'MP_ACCESS_TOKEN no configurado' });
+      }
+
+      // Crear una preferencia de prueba simple
+      const preference = new mercadopago.Preference(client);
+      
+      const testResult = await preference.create({
+        body: {
+          items: [{
+            id: 'test_item',
+            title: 'Producto de prueba',
+            quantity: 1,
+            unit_price: 1.00,
+            currency_id: "ARS"
+          }],
+          external_reference: 'test_connection'
+        }
+      });
+
+      console.log('DEBUG: Conexión exitosa con MercadoPago:', testResult.id);
+      res.json({ 
+        success: true, 
+        message: 'Conexión exitosa con MercadoPago',
+        preferenceId: testResult.id 
+      });
+
+    } catch (error) {
+      console.error('ERROR: Fallo en prueba de conectividad:', error);
+      res.status(500).json({ 
+        error: 'Error de conectividad con MercadoPago', 
+        details: error.message,
+        type: error.type || 'unknown'
+      });
+    }
+  }
+
   // Maneja el callback de OAuth
  
   // Suscripciones
@@ -63,8 +115,42 @@ class MercadoPagoController {
   // PAGOS DE PRODUCTOS CENTRALIZADO - REESCRITO
   static async createProductPreference(req, res) {
     try {
-      console.log('DEBUG: Body recibido:', req.body);
+      console.log('=== INICIO DE CREACIÓN DE PREFERENCIA ===');
+      console.log('DEBUG: Headers recibidos:', JSON.stringify(req.headers, null, 2));
+      console.log('DEBUG: Content-Type:', req.headers['content-type']);
+      console.log('DEBUG: Body recibido (raw):', req.body);
+      console.log('DEBUG: Body recibido (stringified):', JSON.stringify(req.body, null, 2));
+      
       const { products, buyerId, buyerEmail } = req.body;
+      
+      console.log('DEBUG: Datos extraídos:');
+      console.log('  - products:', products);
+      console.log('  - buyerId:', buyerId);
+      console.log('  - buyerEmail:', buyerEmail);
+      console.log('  - products es array:', Array.isArray(products));
+      console.log('  - products length:', products ? products.length : 'undefined');
+
+      // Validar variables de entorno y configuración
+      if (!process.env.MP_ACCESS_TOKEN) {
+        console.error('ERROR: MP_ACCESS_TOKEN no está configurado');
+        return res.status(500).json({ error: 'Configuración de MercadoPago incompleta' });
+      }
+
+      if (!process.env.BASE_URL || !process.env.FRONTEND_URL) {
+        console.error('ERROR: Variables de entorno BASE_URL o FRONTEND_URL no configuradas');
+        return res.status(500).json({ error: 'Configuración de URLs incompleta' });
+      }
+
+      if (!client) {
+        console.error('ERROR: Cliente de MercadoPago no inicializado');
+        return res.status(500).json({ error: 'Error de configuración de MercadoPago' });
+      }
+
+      console.log('DEBUG: Variables de entorno validadas');
+      console.log('DEBUG: MP_ACCESS_TOKEN configurado:', !!process.env.MP_ACCESS_TOKEN);
+      console.log('DEBUG: BASE_URL:', process.env.BASE_URL);
+      console.log('DEBUG: FRONTEND_URL:', process.env.FRONTEND_URL);
+      console.log('DEBUG: Cliente MercadoPago inicializado:', !!client);
 
       if (!products || !Array.isArray(products) || products.length === 0) {
         return res.status(400).json({ error: 'El array de productos es inválido o está vacío' });
@@ -117,11 +203,13 @@ class MercadoPagoController {
 
       // Generar ID único para la compra
       const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      console.log('DEBUG: Purchase ID generado:', purchaseId);
 
       // Crear preferencia usando la configuración simplificada
+      console.log('DEBUG: Creando instancia de Preference...');
       const preference = new mercadopago.Preference(client);
 
-      const result = await preference.create({
+      const preferenceData = {
         body: {
           items: validatedProducts.map(product => ({
             id: product.productId,
@@ -142,7 +230,13 @@ class MercadoPagoController {
             email: buyerEmail
           }
         }
-      });
+      };
+
+      console.log('DEBUG: Datos de preferencia a enviar:', JSON.stringify(preferenceData, null, 2));
+
+      console.log('DEBUG: Llamando a preference.create()...');
+      const result = await preference.create(preferenceData);
+      console.log('DEBUG: Respuesta de MercadoPago recibida:', result);
 
       // Guardar la compra pendiente en Firestore
       await db.collection('pending_purchases').doc(purchaseId).set({
@@ -160,7 +254,23 @@ class MercadoPagoController {
 
     } catch (error) {
       console.error('ERROR: Error creando preferencia centralizada:', error);
-      res.status(500).json({ error: 'Error creando preferencia', details: error.message });
+      console.error('ERROR: Stack trace:', error.stack);
+      
+      // Log adicional para errores de MercadoPago
+      if (error.type === 'invalid-json') {
+        console.error('ERROR: MercadoPago devolvió una respuesta JSON inválida');
+        console.error('ERROR: Esto puede indicar un problema con el token de acceso o la API');
+      }
+      
+      if (error.message && error.message.includes('fetch')) {
+        console.error('ERROR: Problema de conectividad con MercadoPago');
+      }
+
+      res.status(500).json({ 
+        error: 'Error creando preferencia', 
+        details: error.message,
+        type: error.type || 'unknown'
+      });
     }
   }
 
