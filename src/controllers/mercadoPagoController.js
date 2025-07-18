@@ -523,189 +523,141 @@ class MercadoPagoController {
     }
   }
 
+
+
   // PAGOS DE PRODUCTOS CENTRALIZADO - REESCRITO
-  static async createProductPreference(req, res) {
-    try {
-      console.log('=== INICIO DE CREACIÓN DE PREFERENCIA ===');
-      console.log('DEBUG: Headers recibidos:', JSON.stringify(req.headers, null, 2));
-      console.log('DEBUG: Content-Type:', req.headers['content-type']);
-      console.log('DEBUG: Body recibido (raw):', req.body);
-      console.log('DEBUG: Body recibido (stringified):', JSON.stringify(req.body, null, 2));
-      
-      const { products, buyerId, buyerEmail } = req.body;
-      
-      console.log('DEBUG: Datos extraídos:');
-      console.log('  - products:', products);
-      console.log('  - buyerId:', buyerId);
-      console.log('  - buyerEmail:', buyerEmail);
-      console.log('  - products es array:', Array.isArray(products));
-      console.log('  - products length:', products ? products.length : 'undefined');
+static async createProductPreference(req, res) {
+  try {
+    console.log('=== INICIO DE CREACIÓN DE PREFERENCIA ===');
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Content-Type:', req.headers['content-type']);
+    console.log('Body (raw):', req.body);
+    console.log('Body (stringified):', JSON.stringify(req.body, null, 2));
 
-      // Validar variables de entorno y configuración
-      if (!process.env.MP_ACCESS_TOKEN) {
-        console.error('ERROR: MP_ACCESS_TOKEN no está configurado');
-        return res.status(500).json({ error: 'Configuración de MercadoPago incompleta' });
-      }
+    const { products, buyerId, buyerEmail } = req.body;
 
-      if (!process.env.BASE_URL || !process.env.FRONTEND_URL) {
-        console.error('ERROR: Variables de entorno BASE_URL o FRONTEND_URL no configuradas');
-        return res.status(500).json({ error: 'Configuración de URLs incompleta' });
-      }
-
-      if (!client) {
-        console.error('ERROR: Cliente de MercadoPago no inicializado');
-        return res.status(500).json({ error: 'Error de configuración de MercadoPago' });
-      }
-
-      console.log('DEBUG: Variables de entorno validadas');
-      console.log('DEBUG: MP_ACCESS_TOKEN configurado:', !!process.env.MP_ACCESS_TOKEN);
-      console.log('DEBUG: BASE_URL:', process.env.BASE_URL);
-      console.log('DEBUG: FRONTEND_URL:', process.env.FRONTEND_URL);
-      console.log('DEBUG: Cliente MercadoPago inicializado:', !!client);
-
-      if (!products || !Array.isArray(products) || products.length === 0) {
-        return res.status(400).json({ error: 'El array de productos es inválido o está vacío' });
-      }
-
-      if (!buyerId || !buyerEmail) {
-        return res.status(400).json({ error: 'Faltan buyerId o buyerEmail' });
-      }
-
-      const validatedProducts = [];
-      let totalAmount = 0;
-
-      // Validar cada producto
-      for (const [i, product] of products.entries()) {
-        const { productId, quantity } = product;
-
-        if (!productId || typeof productId !== 'string' || !quantity || typeof quantity !== 'number' || quantity <= 0) {
-          return res.status(400).json({ error: `Datos inválidos en el producto ${i}` });
-        }
-
-        const productDoc = await db.collection('products').doc(productId).get();
-        if (!productDoc.exists) {
-          return res.status(404).json({ error: `Producto no encontrado: ${productId}` });
-        }
-
-        const productData = productDoc.data();
-
-        if (productData.disponible === false) {
-          return res.status(400).json({ error: `El producto ${productData.name} no está disponible` });
-        }
-
-        if (typeof productData.stock === 'number' && productData.stock < quantity) {
-          return res.status(400).json({ error: `Stock insuficiente para el producto ${productData.name}` });
-        }
-
-        validatedProducts.push({
-          productId,
-          quantity,
-          vendedorId: productData.sellerId,
-          name: productData.name,
-          price: productData.price,
-          stock: productData.stock ?? null,
-          paidToSeller: false
-        });
-
-        totalAmount += productData.price * quantity;
-      }
-
-      console.log('DEBUG: Productos validados:', validatedProducts);
-
-      // Generar ID único para la compra
-      const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      console.log('DEBUG: Purchase ID generado:', purchaseId);
-
-      // Crear preferencia usando la configuración simplificada
-      console.log('DEBUG: Creando instancia de Preference...');
-      const preference = new mercadopago.Preference(client);
-
-      const preferenceData = {
-        body: {
-          items: validatedProducts.map(product => ({
-            id: product.productId,
-            title: product.name,
-            quantity: product.quantity,
-            unit_price: parseFloat(product.price),
-            currency_id: "ARS"
-          })),
-          back_urls: {
-            success: `${process.env.FRONTEND_URL}/purchase/success`,
-            failure: `${process.env.FRONTEND_URL}/purchase/failure`,
-            pending: `${process.env.FRONTEND_URL}/purchase/pending`
-          },
-          auto_return: "approved",
-          notification_url: `${process.env.BASE_URL}/api/mercadopago/webhooks`,
-          external_reference: purchaseId,
-          payer: {
-            email: buyerEmail
-          }
-        }
-      };
-
-      console.log('DEBUG: Datos de preferencia a enviar:', JSON.stringify(preferenceData, null, 2));
-
-      console.log('DEBUG: Llamando a preference.create()...');
-      console.log('DEBUG: Token usado:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
-      
-      try {
-        const result = await preference.create(preferenceData);
-        console.log('DEBUG: Respuesta de MercadoPago recibida:', result);
-      } catch (preferenceError) {
-        console.error('ERROR: Error específico de preference.create():', preferenceError);
-        console.error('ERROR: Tipo de error:', preferenceError.constructor.name);
-        console.error('ERROR: Mensaje:', preferenceError.message);
-        
-        // Intentar obtener más información del error
-        if (preferenceError.response) {
-          console.error('ERROR: Status:', preferenceError.response.status);
-          console.error('ERROR: Headers:', preferenceError.response.headers);
-          try {
-            const errorBody = await preferenceError.response.text();
-            console.error('ERROR: Response body:', errorBody);
-          } catch (e) {
-            console.error('ERROR: No se pudo leer response body');
-          }
-        }
-        
-        throw preferenceError;
-      }
-
-      // Guardar la compra pendiente en Firestore
-      await db.collection('pending_purchases').doc(purchaseId).set({
-        buyerId,
-        buyerEmail,
-        products: validatedProducts,
-        totalAmount,
-        status: 'pending',
-        createdAt: new Date(),
-        preferenceId: result.id
-      });
-
-      console.log('DEBUG: Preferencia creada exitosamente:', result.id);
-      res.json(result);
-
-    } catch (error) {
-      console.error('ERROR: Error creando preferencia centralizada:', error);
-      console.error('ERROR: Stack trace:', error.stack);
-      
-      // Log adicional para errores de MercadoPago
-      if (error.type === 'invalid-json') {
-        console.error('ERROR: MercadoPago devolvió una respuesta JSON inválida');
-        console.error('ERROR: Esto puede indicar un problema con el token de acceso o la API');
-      }
-      
-      if (error.message && error.message.includes('fetch')) {
-        console.error('ERROR: Problema de conectividad con MercadoPago');
-      }
-
-      res.status(500).json({ 
-        error: 'Error creando preferencia', 
-        details: error.message,
-        type: error.type || 'unknown'
+    // Validaciones iniciales
+    if (!process.env.MP_ACCESS_TOKEN || !process.env.BASE_URL || !process.env.FRONTEND_URL || !client) {
+      return res.status(500).json({
+        error: 'Configuración de entorno incompleta o cliente de MercadoPago no inicializado'
       });
     }
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ error: 'El array de productos es inválido o está vacío' });
+    }
+
+    if (!buyerId || !buyerEmail) {
+      return res.status(400).json({ error: 'Faltan buyerId o buyerEmail' });
+    }
+
+    const validatedProducts = [];
+    let totalAmount = 0;
+
+    // Validar y recolectar productos
+    for (const [i, product] of products.entries()) {
+      const { productId, quantity } = product;
+
+      if (!productId || typeof productId !== 'string' || typeof quantity !== 'number' || quantity <= 0) {
+        return res.status(400).json({ error: `Datos inválidos en el producto ${i}` });
+      }
+
+      const productDoc = await db.collection('products').doc(productId).get();
+      if (!productDoc.exists) {
+        return res.status(404).json({ error: `Producto no encontrado: ${productId}` });
+      }
+
+      const productData = productDoc.data();
+
+      if (productData.disponible === false) {
+        return res.status(400).json({ error: `El producto ${productData.name} no está disponible` });
+      }
+
+      if (typeof productData.stock === 'number' && productData.stock < quantity) {
+        return res.status(400).json({ error: `Stock insuficiente para el producto ${productData.name}` });
+      }
+
+      validatedProducts.push({
+        productId,
+        quantity,
+        vendedorId: productData.sellerId,
+        name: productData.name,
+        price: productData.price,
+        stock: productData.stock ?? null,
+        paidToSeller: false
+      });
+
+      totalAmount += productData.price * quantity;
+    }
+
+    // Generar ID de la compra
+    const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const preference = new mercadopago.Preference(client);
+
+    const preferenceData = {
+      body: {
+        items: validatedProducts.map((p) => ({
+          id: p.productId,
+          title: p.name,
+          quantity: p.quantity,
+          unit_price: parseFloat(p.price),
+          currency_id: "ARS"
+        })),
+        back_urls: {
+          success: `${process.env.FRONTEND_URL}/purchase/success`,
+          failure: `${process.env.FRONTEND_URL}/purchase/failure`,
+          pending: `${process.env.FRONTEND_URL}/purchase/pending`
+        },
+        auto_return: "approved",
+        notification_url: `${process.env.BASE_URL}/api/mercadopago/webhooks`,
+        external_reference: purchaseId,
+        payer: {
+          email: buyerEmail
+        }
+      }
+    };
+
+    // Crear preferencia
+    let result;
+    try {
+      result = await preference.create(preferenceData);
+      console.log('Preferencia creada:', result);
+    } catch (preferenceError) {
+      console.error('Error creando preferencia:', preferenceError);
+      if (preferenceError.response) {
+        console.error('Status:', preferenceError.response.status);
+        try {
+          const errorBody = await preferenceError.response.text();
+          console.error('Response body:', errorBody);
+        } catch (e) {
+          console.error('No se pudo leer response body');
+        }
+      }
+      throw preferenceError;
+    }
+
+    // Guardar en Firestore
+    await db.collection('pending_purchases').doc(purchaseId).set({
+      buyerId,
+      buyerEmail,
+      products: validatedProducts,
+      totalAmount,
+      status: 'pending',
+      createdAt: new Date(),
+      preferenceId: result.id
+    });
+
+    return res.json(result);
+
+  } catch (error) {
+    console.error('Error creando preferencia centralizada:', error);
+    res.status(500).json({
+      error: 'Error creando preferencia',
+      details: error.message,
+      type: error.type || 'unknown'
+    });
   }
+}
 
 
   // WEBHOOK CENTRALIZADO - ACTUALIZADO
