@@ -23,6 +23,73 @@ try {
 }
 
 class MercadoPagoController {
+  // Función simple para probar el token sin usar /users/me
+  static async simpleTokenTest(req, res) {
+    try {
+      console.log('=== PRUEBA SIMPLE DE TOKEN ===');
+      
+      if (!process.env.MP_ACCESS_TOKEN) {
+        return res.status(500).json({ error: 'MP_ACCESS_TOKEN no configurado' });
+      }
+
+      console.log('DEBUG: Token configurado:', !!process.env.MP_ACCESS_TOKEN);
+      console.log('DEBUG: Primeros 10 caracteres:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+      
+      // Probar con una petición más simple - crear una preferencia mínima
+      const testPreference = {
+        items: [{
+          id: 'test_item',
+          title: 'Test Product',
+          quantity: 1,
+          unit_price: 1.00,
+          currency_id: "ARS"
+        }],
+        external_reference: 'test_token_verification'
+      };
+
+      console.log('DEBUG: Intentando crear preferencia de prueba...');
+      
+      const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(testPreference)
+      });
+
+      console.log('DEBUG: Status de respuesta:', response.status);
+      console.log('DEBUG: Headers de respuesta:', Object.fromEntries(response.headers.entries()));
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('DEBUG: Error response:', errorText);
+        return res.status(response.status).json({ 
+          error: 'Error creando preferencia de prueba',
+          status: response.status,
+          details: errorText
+        });
+      }
+
+      const result = await response.json();
+      console.log('DEBUG: Preferencia creada exitosamente:', result.id);
+
+      res.json({
+        success: true,
+        message: 'Token válido - Preferencia creada exitosamente',
+        preferenceId: result.id,
+        isSandbox: process.env.MP_ACCESS_TOKEN.includes('TEST')
+      });
+
+    } catch (error) {
+      console.error('ERROR: Error en prueba simple:', error);
+      res.status(500).json({ 
+        error: 'Error en prueba simple', 
+        details: error.message 
+      });
+    }
+  }
+
   // Función para verificar el token de MercadoPago
   static async verifyMercadoPagoToken(req, res) {
     try {

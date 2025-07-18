@@ -9,6 +9,7 @@ router.post('/webhooks', MercadoPagoController.handleWebhook);
 router.post('/payments/create-preference', MercadoPagoController.createProductPreference);
 router.get('/test-connection', MercadoPagoController.testMercadoPagoConnection);
 router.get('/verify-token', MercadoPagoController.verifyMercadoPagoToken);
+router.get('/simple-token-test', MercadoPagoController.simpleTokenTest);
 
 // Rutas protegidas - requieren autenticación
 router.use(authenticateToken);
