@@ -23,6 +23,62 @@ try {
 }
 
 class MercadoPagoController {
+  // Función para verificar el token de MercadoPago
+  static async verifyMercadoPagoToken(req, res) {
+    try {
+      console.log('=== VERIFICACIÓN DE TOKEN MERCADOPAGO ===');
+      
+      if (!process.env.MP_ACCESS_TOKEN) {
+        return res.status(500).json({ error: 'MP_ACCESS_TOKEN no configurado' });
+      }
+
+      console.log('DEBUG: Token configurado:', !!process.env.MP_ACCESS_TOKEN);
+      console.log('DEBUG: Primeros 10 caracteres del token:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+      
+      // Verificar si es token de sandbox o producción
+      const isSandbox = process.env.MP_ACCESS_TOKEN.includes('TEST');
+      console.log('DEBUG: Es token de sandbox:', isSandbox);
+
+      // Intentar hacer una petición simple a la API de MercadoPago
+      const response = await fetch('https://api.mercadopago.com/users/me', {
+        headers: {
+          'Authorization': `Bearer ${process.env.MP_ACCESS_TOKEN}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('DEBUG: Status de respuesta:', response.status);
+      console.log('DEBUG: Headers de respuesta:', Object.fromEntries(response.headers.entries()));
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.log('DEBUG: Error response:', errorText);
+        return res.status(response.status).json({ 
+          error: 'Error verificando token',
+          status: response.status,
+          details: errorText
+        });
+      }
+
+      const userData = await response.json();
+      console.log('DEBUG: Datos del usuario:', userData);
+
+      res.json({
+        success: true,
+        message: 'Token válido',
+        user: userData,
+        isSandbox: isSandbox
+      });
+
+    } catch (error) {
+      console.error('ERROR: Error verificando token:', error);
+      res.status(500).json({ 
+        error: 'Error verificando token', 
+        details: error.message 
+      });
+    }
+  }
+
   // Función de prueba para verificar conectividad con MercadoPago
   static async testMercadoPagoConnection(req, res) {
     try {
@@ -235,8 +291,30 @@ class MercadoPagoController {
       console.log('DEBUG: Datos de preferencia a enviar:', JSON.stringify(preferenceData, null, 2));
 
       console.log('DEBUG: Llamando a preference.create()...');
-      const result = await preference.create(preferenceData);
-      console.log('DEBUG: Respuesta de MercadoPago recibida:', result);
+      console.log('DEBUG: Token usado:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
+      
+      try {
+        const result = await preference.create(preferenceData);
+        console.log('DEBUG: Respuesta de MercadoPago recibida:', result);
+      } catch (preferenceError) {
+        console.error('ERROR: Error específico de preference.create():', preferenceError);
+        console.error('ERROR: Tipo de error:', preferenceError.constructor.name);
+        console.error('ERROR: Mensaje:', preferenceError.message);
+        
+        // Intentar obtener más información del error
+        if (preferenceError.response) {
+          console.error('ERROR: Status:', preferenceError.response.status);
+          console.error('ERROR: Headers:', preferenceError.response.headers);
+          try {
+            const errorBody = await preferenceError.response.text();
+            console.error('ERROR: Response body:', errorBody);
+          } catch (e) {
+            console.error('ERROR: No se pudo leer response body');
+          }
+        }
+        
+        throw preferenceError;
+      }
 
       // Guardar la compra pendiente en Firestore
       await db.collection('pending_purchases').doc(purchaseId).set({

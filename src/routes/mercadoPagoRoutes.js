@@ -8,6 +8,7 @@ const router = express.Router();
 router.post('/webhooks', MercadoPagoController.handleWebhook); 
 router.post('/payments/create-preference', MercadoPagoController.createProductPreference);
 router.get('/test-connection', MercadoPagoController.testMercadoPagoConnection);
+router.get('/verify-token', MercadoPagoController.verifyMercadoPagoToken);
 
 // Rutas protegidas - requieren autenticación
 router.use(authenticateToken);
