@@ -9,6 +9,11 @@ let client;
 let mpSub;
 
 try {
+  // Configuración correcta del SDK de MercadoPago
+  mercadopago.configure({
+    access_token: process.env.MP_ACCESS_TOKEN
+  });
+  
   client = new mercadopago.MercadoPagoConfig({ 
     accessToken: process.env.MP_ACCESS_TOKEN 
   });
@@ -18,6 +23,8 @@ try {
   });
   
   console.log('DEBUG: Configuración de MercadoPago inicializada correctamente');
+  console.log('DEBUG: Token configurado:', !!process.env.MP_ACCESS_TOKEN);
+  console.log('DEBUG: Primeros 10 caracteres:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
 } catch (error) {
   console.error('ERROR: Error inicializando configuración de MercadoPago:', error);
 }
