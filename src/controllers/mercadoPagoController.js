@@ -37,7 +37,7 @@ class MercadoPagoController {
         tokenInfo: {
           configured: true,
           length: process.env.MP_ACCESS_TOKEN.length,
-          format: /^APP_USR-[a-zA-Z0-9]+$/.test(process.env.MP_ACCESS_TOKEN),
+          format: /^APP_USR-[a-zA-Z0-9-]+$/.test(process.env.MP_ACCESS_TOKEN),
           isSandbox: process.env.MP_ACCESS_TOKEN.includes('TEST')
         },
         tests: {}
@@ -173,7 +173,7 @@ class MercadoPagoController {
       console.log('DEBUG: Últimos 10 caracteres:', '...' + process.env.MP_ACCESS_TOKEN.substring(process.env.MP_ACCESS_TOKEN.length - 10));
       
       // Verificar si el token tiene el formato correcto
-      const tokenPattern = /^APP_USR-[a-zA-Z0-9]+$/;
+      const tokenPattern = /^APP_USR-[a-zA-Z0-9-]+$/;
       const isValidFormat = tokenPattern.test(process.env.MP_ACCESS_TOKEN);
       console.log('DEBUG: Formato de token válido:', isValidFormat);
       
