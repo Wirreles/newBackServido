@@ -654,7 +654,7 @@ static async createProductPreference(req, res) {
           }
   
           const pendingPurchaseData = pendingPurchaseDoc.data();
-  
+          console.log('DEBUG: pendingPurchaseData en webhook:', JSON.stringify(pendingPurchaseData, null, 2));
           if (status === 'approved') {
             // Actualizar stock
             for (const prod of pendingPurchaseData.products) {
