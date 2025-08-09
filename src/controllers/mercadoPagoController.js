@@ -411,6 +411,9 @@ static async createProductPreference(req, res) {
     console.log('Body (stringified):', JSON.stringify(req.body, null, 2));
 
     const { products, buyerId, buyerEmail, shippingCost } = req.body;
+    
+    console.log('DEBUG: shippingCost recibido:', shippingCost);
+    console.log('DEBUG: Tipo de shippingCost:', typeof shippingCost);
 
     // Validaciones iniciales
     if (!process.env.MP_ACCESS_TOKEN || !process.env.BASE_URL || !process.env.FRONTEND_URL || !client) {
@@ -468,8 +471,19 @@ static async createProductPreference(req, res) {
 
     // Calcular envío total
     let totalShipping = 0;
-    if (shippingCost !== undefined && shippingCost > 0) {
+    console.log('DEBUG: Antes del cálculo - shippingCost:', shippingCost);
+    
+    // Si no se envía shippingCost, intentar calcularlo basándose en la dirección
+    if (shippingCost === undefined || shippingCost === null) {
+      console.log('DEBUG: shippingCost no enviado, intentando calcular automáticamente...');
+      // Por ahora, establecer un costo de envío por defecto para testing
+      totalShipping = 500; // 500 pesos como costo de envío por defecto
+      console.log('DEBUG: Usando costo de envío por defecto:', totalShipping);
+    } else if (shippingCost > 0) {
       totalShipping = shippingCost;
+      console.log('DEBUG: Envío aplicado desde frontend:', totalShipping);
+    } else {
+      console.log('DEBUG: No se aplicó envío - shippingCost es:', shippingCost);
     }
 
     // Incluir envío en el total final
@@ -480,6 +494,7 @@ static async createProductPreference(req, res) {
       envío: totalShipping,
       totalFinal: finalTotal
     });
+    console.log('DEBUG: Total que se enviará a MercadoPago (incluyendo envío):', finalTotal);
 
     // Generar ID de la compra
     const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -506,7 +521,9 @@ static async createProductPreference(req, res) {
     }
 
     // Log de items que se enviarán a MercadoPago
-    console.log('DEBUG: Items que se enviarán a MercadoPago:', items);
+    console.log('DEBUG: Items que se enviarán a MercadoPago:', JSON.stringify(items, null, 2));
+    console.log('DEBUG: Total de items:', items.length);
+    console.log('DEBUG: Total calculado de MercadoPago:', items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0));
 
     const preferenceData = {
       body: {
@@ -538,9 +555,12 @@ static async createProductPreference(req, res) {
       console.log('DEBUG: Intentando crear preferencia con MercadoPago...');
       console.log('DEBUG: Token usado:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
       console.log('DEBUG: Datos de preferencia:', JSON.stringify(preferenceData, null, 2));
+      console.log('DEBUG: Total de items en preferencia:', preferenceData.body.items.length);
+      console.log('DEBUG: Suma total de items (debe incluir envío):', preferenceData.body.items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0));
       
       result = await preference.create(preferenceData);
       console.log('DEBUG: Preferencia creada exitosamente:', result.id);
+      console.log('DEBUG: Respuesta completa de MercadoPago:', JSON.stringify(result, null, 2));
     } catch (preferenceError) {
       console.error('ERROR: Error creando preferencia:', preferenceError);
       console.error('ERROR: Tipo de error:', preferenceError.constructor.name);
