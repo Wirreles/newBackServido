@@ -528,13 +528,7 @@ static async createProductPreference(req, res) {
     const preferenceData = {
       body: {
         items: items,
-        // Mantener shipments para información adicional
-        ...(totalShipping > 0 && {
-          shipments: {
-            cost: totalShipping,
-            mode: "not_specified"
-          }
-        }),
+        // Eliminado: shipments
         back_urls: {
           success: `${process.env.FRONTEND_URL}/purchase/success`,
           failure: `${process.env.FRONTEND_URL}/purchase/failure`,
