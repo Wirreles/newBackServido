@@ -691,7 +691,8 @@ static async createProductPreference(req, res) {
               shippingCost: pendingPurchaseData.shippingCost || 0,
               finalTotal: pendingPurchaseData.finalTotal || pendingPurchaseData.totalAmount,
               paidToSellers: false,
-              createdAt: new Date()
+              createdAt: new Date(),
+              ...(pendingPurchaseData.shippingAddress && { shippingAddress: pendingPurchaseData.shippingAddress }) // AGREGADO
             });
   
             // Eliminar la compra pendiente
