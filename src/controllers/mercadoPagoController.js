@@ -481,20 +481,37 @@ static async createProductPreference(req, res) {
       totalFinal: finalTotal
     });
 
+    // Log de items que se enviarán a MercadoPago
+    console.log('DEBUG: Items que se enviarán a MercadoPago:', items);
+
     // Generar ID de la compra
     const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const preference = new mercadopago.Preference(client);
 
+    // Preparar items incluyendo el costo de envío como item adicional
+    const items = validatedProducts.map((p) => ({
+      id: p.productId,
+      title: p.name,
+      quantity: p.quantity,
+      unit_price: parseFloat(p.price),
+      currency_id: "ARS"
+    }));
+
+    // Agregar costo de envío como item adicional si existe
+    if (totalShipping > 0) {
+      items.push({
+        id: 'shipping_cost',
+        title: 'Costo de envío',
+        quantity: 1,
+        unit_price: totalShipping,
+        currency_id: "ARS"
+      });
+    }
+
     const preferenceData = {
       body: {
-        items: validatedProducts.map((p) => ({
-          id: p.productId,
-          title: p.name,
-          quantity: p.quantity,
-          unit_price: parseFloat(p.price),
-          currency_id: "ARS"
-        })),
-        // Agregar información de envío si hay costo
+        items: items,
+        // Mantener shipments para información adicional
         ...(totalShipping > 0 && {
           shipments: {
             cost: totalShipping,
