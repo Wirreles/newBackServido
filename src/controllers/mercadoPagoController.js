@@ -410,7 +410,7 @@ static async createProductPreference(req, res) {
     console.log('Body (raw):', req.body);
     console.log('Body (stringified):', JSON.stringify(req.body, null, 2));
 
-    const { products, buyerId, buyerEmail } = req.body;
+    const { products, buyerId, buyerEmail, shippingCost } = req.body;
 
     // Validaciones iniciales
     if (!process.env.MP_ACCESS_TOKEN || !process.env.BASE_URL || !process.env.FRONTEND_URL || !client) {
@@ -466,6 +466,21 @@ static async createProductPreference(req, res) {
       totalAmount += productData.price * quantity;
     }
 
+    // Calcular envío total
+    let totalShipping = 0;
+    if (shippingCost !== undefined && shippingCost > 0) {
+      totalShipping = shippingCost;
+    }
+
+    // Incluir envío en el total final
+    const finalTotal = totalAmount + totalShipping;
+
+    console.log('DEBUG: Cálculo de totales:', {
+      subtotal: totalAmount,
+      envío: totalShipping,
+      totalFinal: finalTotal
+    });
+
     // Generar ID de la compra
     const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const preference = new mercadopago.Preference(client);
@@ -479,6 +494,13 @@ static async createProductPreference(req, res) {
           unit_price: parseFloat(p.price),
           currency_id: "ARS"
         })),
+        // Agregar información de envío si hay costo
+        ...(totalShipping > 0 && {
+          shipments: {
+            cost: totalShipping,
+            mode: "not_specified"
+          }
+        }),
         back_urls: {
           success: `${process.env.FRONTEND_URL}/purchase/success`,
           failure: `${process.env.FRONTEND_URL}/purchase/failure`,
@@ -543,18 +565,28 @@ static async createProductPreference(req, res) {
       throw preferenceError;
     }
 
-    // Guardar en Firestore
+    // Guardar en Firestore con información de envío
     await db.collection('pending_purchases').doc(purchaseId).set({
       buyerId,
       buyerEmail,
       products: validatedProducts,
       totalAmount,
+      shippingCost: totalShipping,
+      finalTotal,
       status: 'pending',
       createdAt: new Date(),
       preferenceId: result.id
     });
 
-    return res.json(result);
+    // Retornar respuesta con información de totales
+    return res.json({
+      ...result,
+      totals: {
+        subtotal: totalAmount,
+        shipping: totalShipping,
+        final: finalTotal
+      }
+    });
 
   } catch (error) {
     console.error('Error creando preferencia centralizada:', error);
@@ -616,7 +648,7 @@ static async createProductPreference(req, res) {
               }
             }
   
-            // Guardar la compra finalizada
+            // Guardar la compra finalizada con información de envío
             await db.collection('purchases').add({
               buyerId: pendingPurchaseData.buyerId,
               buyerEmail: pendingPurchaseData.buyerEmail,
@@ -624,6 +656,8 @@ static async createProductPreference(req, res) {
               paymentId: paymentInfo.id,
               status: paymentInfo.status,
               totalAmount: pendingPurchaseData.totalAmount,
+              shippingCost: pendingPurchaseData.shippingCost || 0,
+              finalTotal: pendingPurchaseData.finalTotal || pendingPurchaseData.totalAmount,
               paidToSellers: false,
               createdAt: new Date()
             });
