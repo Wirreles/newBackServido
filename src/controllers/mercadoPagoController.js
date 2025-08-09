@@ -600,13 +600,14 @@ static async createProductPreference(req, res) {
     await db.collection('pending_purchases').doc(purchaseId).set({
       buyerId,
       buyerEmail,
-      products: validatedProducts,
+      products: validatedProducts, // Incluye nombre, cantidad, etc.
       totalAmount,
       shippingCost: totalShipping,
       finalTotal,
       status: 'pending',
       createdAt: new Date(),
-      preferenceId: result.id
+      preferenceId: result.id,
+      ...(req.body.shippingAddress && { shippingAddress: req.body.shippingAddress }) // Guarda la dirección si existe
     });
 
     // Retornar respuesta con información de totales
