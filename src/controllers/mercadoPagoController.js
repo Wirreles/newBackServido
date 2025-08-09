@@ -2,7 +2,7 @@ const mercadopago = require('mercadopago');
 const axios = require('axios');
 const Vendedor = require('../models/vendedor');
 const Subscription = require('../models/subscription');
-const { db } = require('../firebase');
+const { db, FieldValue } = require('../firebase');
 
 // Configuración del SDK de MercadoPago
 let client;
@@ -691,7 +691,7 @@ static async createProductPreference(req, res) {
               shippingCost: pendingPurchaseData.shippingCost || 0,
               finalTotal: pendingPurchaseData.finalTotal || pendingPurchaseData.totalAmount,
               paidToSellers: false,
-              createdAt: new Date(), // <--- SIEMPRE AGREGADO
+              createdAt: FieldValue.serverTimestamp(), // <--- CAMBIO CLAVE
               ...(pendingPurchaseData.shippingAddress && { shippingAddress: pendingPurchaseData.shippingAddress })
             });
   
