@@ -481,9 +481,6 @@ static async createProductPreference(req, res) {
       totalFinal: finalTotal
     });
 
-    // Log de items que se enviarán a MercadoPago
-    console.log('DEBUG: Items que se enviarán a MercadoPago:', items);
-
     // Generar ID de la compra
     const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const preference = new mercadopago.Preference(client);
@@ -507,6 +504,9 @@ static async createProductPreference(req, res) {
         currency_id: "ARS"
       });
     }
+
+    // Log de items que se enviarán a MercadoPago
+    console.log('DEBUG: Items que se enviarán a MercadoPago:', items);
 
     const preferenceData = {
       body: {
