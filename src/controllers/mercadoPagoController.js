@@ -367,6 +367,28 @@ class MercadoPagoController {
         return res.status(404).json({ error: 'Usuario no encontrado' });
       }
 
+      // Obtener precio dinámico desde Firestore
+      let subscriptionPrice = 0;
+      try {
+        const pricingSnapshot = await db.collection('subscriptionPricing')
+          .where('isActive', '==', true)
+          .orderBy('createdAt', 'desc')
+          .limit(1)
+          .get();
+
+        if (!pricingSnapshot.empty) {
+          const pricingDoc = pricingSnapshot.docs[0];
+          subscriptionPrice = pricingDoc.data().price;
+          console.log('Precio de suscripción obtenido:', subscriptionPrice);
+        } else {
+          console.warn('No se encontró precio activo para suscripción, usando precio por defecto');
+          subscriptionPrice = 10; // Precio por defecto como fallback
+        }
+      } catch (pricingError) {
+        console.error('Error obteniendo precio de suscripción:', pricingError);
+        subscriptionPrice = 10; // Precio por defecto como fallback
+      }
+
       // Crear preferencia para suscripción con el token de suscripciones
       const preference = new mercadopago.Preference(mpSub);
 
@@ -376,7 +398,7 @@ class MercadoPagoController {
             id: `subscription_${planType}`,
             title: `Plan ${planType} de Vendedor`,
             quantity: 1,
-            unit_price: Subscription.getPlanPrice(planType),
+            unit_price: subscriptionPrice,
             currency_id: "ARS"
           }],
           payer: {
@@ -392,6 +414,7 @@ class MercadoPagoController {
         }
       });
 
+      console.log('Preferencia de suscripción creada exitosamente con precio:', subscriptionPrice);
       res.json(result);
     } catch (error) {
       console.error('Error creando preferencia de suscripción:', error);
