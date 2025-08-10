@@ -2,7 +2,7 @@ const mercadopago = require('mercadopago');
 const axios = require('axios');
 const Vendedor = require('../models/vendedor');
 const Subscription = require('../models/subscription');
-const { db } = require('../firebase');
+const { db, FieldValue } = require('../firebase');
 
 // Configuración del SDK de MercadoPago
 let client;
@@ -433,7 +433,10 @@ static async createProductPreference(req, res) {
     console.log('Body (raw):', req.body);
     console.log('Body (stringified):', JSON.stringify(req.body, null, 2));
 
-    const { products, buyerId, buyerEmail } = req.body;
+    const { products, buyerId, buyerEmail, shippingCost } = req.body;
+    
+    console.log('DEBUG: shippingCost recibido:', shippingCost);
+    console.log('DEBUG: Tipo de shippingCost:', typeof shippingCost);
 
     // Validaciones iniciales
     if (!process.env.MP_ACCESS_TOKEN || !process.env.BASE_URL || !process.env.FRONTEND_URL || !client) {
@@ -489,19 +492,66 @@ static async createProductPreference(req, res) {
       totalAmount += productData.price * quantity;
     }
 
+    // Calcular envío total
+    let totalShipping = 0;
+    console.log('DEBUG: Antes del cálculo - shippingCost:', shippingCost);
+    
+    // Si no se envía shippingCost, intentar calcularlo basándose en la dirección
+    if (shippingCost === undefined || shippingCost === null) {
+      console.log('DEBUG: shippingCost no enviado, intentando calcular automáticamente...');
+      // Por ahora, establecer un costo de envío por defecto para testing
+      totalShipping = 500; // 500 pesos como costo de envío por defecto
+      console.log('DEBUG: Usando costo de envío por defecto:', totalShipping);
+    } else if (shippingCost > 0) {
+      totalShipping = shippingCost;
+      console.log('DEBUG: Envío aplicado desde frontend:', totalShipping);
+    } else {
+      console.log('DEBUG: No se aplicó envío - shippingCost es:', shippingCost);
+    }
+
+    // Incluir envío en el total final
+    const finalTotal = totalAmount + totalShipping;
+
+    console.log('DEBUG: Cálculo de totales:', {
+      subtotal: totalAmount,
+      envío: totalShipping,
+      totalFinal: finalTotal
+    });
+    console.log('DEBUG: Total que se enviará a MercadoPago (incluyendo envío):', finalTotal);
+
     // Generar ID de la compra
     const purchaseId = `purchase_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const preference = new mercadopago.Preference(client);
 
+    // Preparar items incluyendo el costo de envío como item adicional
+    const items = validatedProducts.map((p) => ({
+      id: p.productId,
+      title: p.name,
+      quantity: p.quantity,
+      unit_price: parseFloat(p.price),
+      currency_id: "ARS"
+    }));
+
+    // Agregar costo de envío como item adicional si existe
+    if (totalShipping > 0) {
+      items.push({
+        id: 'shipping_cost',
+        title: 'Costo de envío',
+        quantity: 1,
+        unit_price: totalShipping,
+        currency_id: "ARS"
+      });
+    }
+
+    // Log de items que se enviarán a MercadoPago
+    console.log('DEBUG: Items que se enviarán a MercadoPago:', JSON.stringify(items, null, 2));
+    console.log('DEBUG: Total de items:', items.length);
+    console.log('DEBUG: Total calculado de MercadoPago:', items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0));
+
     const preferenceData = {
       body: {
-        items: validatedProducts.map((p) => ({
-          id: p.productId,
-          title: p.name,
-          quantity: p.quantity,
-          unit_price: parseFloat(p.price),
-          currency_id: "ARS"
-        })),
+        items: items,
+        // Eliminado: shipments
         back_urls: {
           success: `${process.env.FRONTEND_URL}/purchase/success`,
           failure: `${process.env.FRONTEND_URL}/purchase/failure`,
@@ -522,9 +572,12 @@ static async createProductPreference(req, res) {
       console.log('DEBUG: Intentando crear preferencia con MercadoPago...');
       console.log('DEBUG: Token usado:', process.env.MP_ACCESS_TOKEN.substring(0, 10) + '...');
       console.log('DEBUG: Datos de preferencia:', JSON.stringify(preferenceData, null, 2));
+      console.log('DEBUG: Total de items en preferencia:', preferenceData.body.items.length);
+      console.log('DEBUG: Suma total de items (debe incluir envío):', preferenceData.body.items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0));
       
       result = await preference.create(preferenceData);
       console.log('DEBUG: Preferencia creada exitosamente:', result.id);
+      console.log('DEBUG: Respuesta completa de MercadoPago:', JSON.stringify(result, null, 2));
     } catch (preferenceError) {
       console.error('ERROR: Error creando preferencia:', preferenceError);
       console.error('ERROR: Tipo de error:', preferenceError.constructor.name);
@@ -566,18 +619,29 @@ static async createProductPreference(req, res) {
       throw preferenceError;
     }
 
-    // Guardar en Firestore
+    // Guardar en Firestore con información de envío
     await db.collection('pending_purchases').doc(purchaseId).set({
       buyerId,
       buyerEmail,
-      products: validatedProducts,
+      products: validatedProducts, // Incluye nombre, cantidad, etc.
       totalAmount,
+      shippingCost: totalShipping,
+      finalTotal,
       status: 'pending',
       createdAt: new Date(),
-      preferenceId: result.id
+      preferenceId: result.id,
+      ...(req.body.shippingAddress && { shippingAddress: req.body.shippingAddress }) // Guarda la dirección si existe
     });
 
-    return res.json(result);
+    // Retornar respuesta con información de totales
+    return res.json({
+      ...result,
+      totals: {
+        subtotal: totalAmount,
+        shipping: totalShipping,
+        final: finalTotal
+      }
+    });
 
   } catch (error) {
     console.error('Error creando preferencia centralizada:', error);
@@ -613,7 +677,7 @@ static async createProductPreference(req, res) {
           }
   
           const pendingPurchaseData = pendingPurchaseDoc.data();
-  
+          console.log('DEBUG: pendingPurchaseData en webhook:', JSON.stringify(pendingPurchaseData, null, 2));
           if (status === 'approved') {
             // Actualizar stock
             for (const prod of pendingPurchaseData.products) {
@@ -639,7 +703,7 @@ static async createProductPreference(req, res) {
               }
             }
   
-            // Guardar la compra finalizada
+            // Guardar la compra finalizada con información de envío
             await db.collection('purchases').add({
               buyerId: pendingPurchaseData.buyerId,
               buyerEmail: pendingPurchaseData.buyerEmail,
@@ -647,8 +711,11 @@ static async createProductPreference(req, res) {
               paymentId: paymentInfo.id,
               status: paymentInfo.status,
               totalAmount: pendingPurchaseData.totalAmount,
+              shippingCost: pendingPurchaseData.shippingCost || 0,
+              finalTotal: pendingPurchaseData.finalTotal || pendingPurchaseData.totalAmount,
               paidToSellers: false,
-              createdAt: new Date()
+              createdAt: FieldValue.serverTimestamp(), // <--- CAMBIO CLAVE
+              ...(pendingPurchaseData.shippingAddress && { shippingAddress: pendingPurchaseData.shippingAddress })
             });
   
             // Eliminar la compra pendiente
