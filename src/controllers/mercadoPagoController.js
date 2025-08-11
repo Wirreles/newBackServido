@@ -2,7 +2,7 @@ const mercadopago = require('mercadopago');
 const axios = require('axios');
 const Vendedor = require('../models/vendedor');
 const Subscription = require('../models/subscription');
-const { db, FieldValue } = require('../firebase');
+const { db } = require('../firebase');
 
 // Configuración del SDK de MercadoPago
 let client;
@@ -703,20 +703,20 @@ static async createProductPreference(req, res) {
               }
             }
   
-            // Guardar la compra finalizada con información de envío
-            await db.collection('purchases').add({
-              buyerId: pendingPurchaseData.buyerId,
-              buyerEmail: pendingPurchaseData.buyerEmail,
-              products: pendingPurchaseData.products,
-              paymentId: paymentInfo.id,
-              status: paymentInfo.status,
-              totalAmount: pendingPurchaseData.totalAmount,
-              shippingCost: pendingPurchaseData.shippingCost || 0,
-              finalTotal: pendingPurchaseData.finalTotal || pendingPurchaseData.totalAmount,
-              paidToSellers: false,
-              createdAt: FieldValue.serverTimestamp(), // <--- CAMBIO CLAVE
-              ...(pendingPurchaseData.shippingAddress && { shippingAddress: pendingPurchaseData.shippingAddress })
-            });
+                         // Guardar la compra finalizada con información de envío
+             await db.collection('purchases').add({
+               buyerId: pendingPurchaseData.buyerId,
+               buyerEmail: pendingPurchaseData.buyerEmail,
+               products: pendingPurchaseData.products,
+               paymentId: paymentInfo.id,
+               status: paymentInfo.status,
+               totalAmount: pendingPurchaseData.totalAmount,
+               shippingCost: pendingPurchaseData.shippingCost || 0,
+               finalTotal: pendingPurchaseData.finalTotal || pendingPurchaseData.totalAmount,
+               paidToSellers: false,
+               createdAt: new Date(),
+               ...(pendingPurchaseData.shippingAddress && { shippingAddress: pendingPurchaseData.shippingAddress })
+             });
   
             // Eliminar la compra pendiente
             await pendingPurchaseRef.delete();
